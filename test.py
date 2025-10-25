@@ -1,8 +1,12 @@
+from flask import Flask, request, jsonify
 import numpy as np
 from astropy.coordinates import SkyCoord
 from astropy.time import Time
 from astropy import units as u
 from scipy.optimize import minimize
+from datetime import datetime
+
+app = Flask(__name__)
 
 class CometOrbitCalculator:
     def __init__(self):
@@ -203,20 +207,48 @@ def calculate_orbit_from_observations(observations_array):
 
     return orbital_elements, min_distance_date, min_distance
 
-# ВХОДНЫЕ ДАННЫЕ из эфемерид Марса
-input_observations = [
-    [15.30977, -18.61633, "2025-10-25 00:00:00"],
-    [15.40572, -18.99403, "2025-10-27 00:00:00"],
-    [15.50238, -19.36158, "2025-10-29 00:00:00"],
-    [15.59917, -19.71861, "2025-10-31 00:00:00"],
-    [15.86444, -20.06417, "2025-11-02 00:00:00"],
-]
+@app.route('/calculate_orbit', methods=['POST'])
+def calculate_orbit():
+    try:
+        data = request.get_json()
+
+        if not data or 'observations' not in data:
+            return jsonify({'error': 'No observations provided'}), 400
+
+        observations = data['observations']
+
+        # Проверяем формат данных
+        for obs in observations:
+            if len(obs) != 3:
+                return jsonify({'error': 'Each observation must contain [ra, dec, datetime]'}), 400
+
+        # Вычисляем орбитальные элементы
+        orbital_elements, min_distance_date, min_distance = calculate_orbit_from_observations(observations)
+
+        # Форматируем результат
+        result = {
+            'orbital_elements': {
+                'a': float(orbital_elements[0]),  # большая полуось
+                'e': float(orbital_elements[1]),  # эксцентриситет
+                'i': float(orbital_elements[2]),  # наклонение
+                'Omega': float(orbital_elements[3]),  # долгота восходящего узла
+                'omega': float(orbital_elements[4]),  # аргумент перицентра
+                'T': float(orbital_elements[5])   # время прохождения перицентра
+            },
+            'min_encounter': {
+                'date': min_distance_date.strftime('%Y-%m-%d %H:%M:%S'),
+                'distance_au': float(min_distance)
+            }
+        }
+
+        return jsonify(result)
+
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/health', methods=['GET'])
+def health_check():
+    return jsonify({'status': 'healthy'})
 
 if __name__ == "__main__":
-    output_elements, min_distance_date, min_distance = calculate_orbit_from_observations(input_observations)
-
-    # Вывод в виде массива из 6 элементов
-    print("Орбитальные элементы:")
-    print(output_elements)
-    print(f"\n{min_distance_date}")
-    print(f" {min_distance:.6f}")
+    app.run(debug=True, host='0.0.0.0', port=5000)
