@@ -10,44 +10,47 @@
         <h1>Расчет орбиты кометы</h1>
 
         <div class="input-section">
-            <h2>Введите 5 наблюдений:</h2>
+            <h2>Введите наблюдения (минимум 5):</h2>
 
-            <div class="point-row">
-                <div class="point-label">Точка 1:</div>
-                <input type="datetime-local" id="time1">
-                <input type="number" id="ra1" placeholder="Прямое восхождение (часы)" step="0.1">
-                <input type="number" id="dec1" placeholder="Склонение (градусы)" step="0.1">
+            <div id="points-container">
+                <div class="point-row">
+                    <div class="point-label">Точка 1:</div>
+                    <input type="datetime-local" id="time1">
+                    <input type="number" id="ra1" placeholder="Прямое восхождение (часы)" step="0.1">
+                    <input type="number" id="dec1" placeholder="Склонение (градусы)" step="0.1">
+                </div>
+
+                <div class="point-row">
+                    <div class="point-label">Точка 2:</div>
+                    <input type="datetime-local" id="time2">
+                    <input type="number" id="ra2" placeholder="Прямое восхождение (часы)" step="0.1" >
+                    <input type="number" id="dec2" placeholder="Склонение (градусы)" step="0.1" >
+                </div>
+
+                <div class="point-row">
+                    <div class="point-label">Точка 3:</div>
+                    <input type="datetime-local" id="time3" >
+                    <input type="number" id="ra3" placeholder="Прямое восхождение (часы)" step="0.1" >
+                    <input type="number" id="dec3" placeholder="Склонение (градусы)" step="0.1" >
+                </div>
+
+                <div class="point-row">
+                    <div class="point-label">Точка 4:</div>
+                    <input type="datetime-local" id="time4">
+                    <input type="number" id="ra4" placeholder="Прямое восхождение (часы)" step="0.1">
+                    <input type="number" id="dec4" placeholder="Склонение (градусы)" step="0.1">
+                </div>
+
+                <div class="point-row">
+                    <div class="point-label">Точка 5:</div>
+                    <input type="datetime-local" id="time5">
+                    <input type="number" id="ra5" placeholder="Прямое восхождение (часы)" step="0.1">
+                    <input type="number" id="dec5" placeholder="Склонение (градусы)" step="0.1">
+                </div>
             </div>
 
-            <div class="point-row">
-                <div class="point-label">Точка 2:</div>
-                <input type="datetime-local" id="time2">
-                <input type="number" id="ra2" placeholder="Прямое восхождение (часы)" step="0.1" >
-                <input type="number" id="dec2" placeholder="Склонение (градусы)" step="0.1" >
-            </div>
-
-            <div class="point-row">
-                <div class="point-label">Точка 3:</div>
-                <input type="datetime-local" id="time3" >
-                <input type="number" id="ra3" placeholder="Прямое восхождение (часы)" step="0.1" >
-                <input type="number" id="dec3" placeholder="Склонение (градусы)" step="0.1" >
-            </div>
-
-            <div class="point-row">
-                <div class="point-label">Точка 4:</div>
-                <input type="datetime-local" id="time4">
-                <input type="number" id="ra4" placeholder="Прямое восхождение (часы)" step="0.1">
-                <input type="number" id="dec4" placeholder="Склонение (градусы)" step="0.1">
-            </div>
-
-            <div class="point-row">
-                <div class="point-label">Точка 5:</div>
-                <input type="datetime-local" id="time5">
-                <input type="number" id="ra5" placeholder="Прямое восхождение (часы)" step="0.1">
-                <input type="number" id="dec5" placeholder="Склонение (градусы)" step="0.1">
-            </div>
-
-            <button>Рассчитать параметры орбиты</button>
+            <button onclick="addPoint()">+ Добавить точку</button>
+            <button onclick="calculateOrbit()">Рассчитать параметры орбиты</button>
         </div>
 
         <div class="results-section">
@@ -55,26 +58,26 @@
             <div class="params-grid">
                 <div class="param-card">
                     <h3>Большая полуось</h3>
-                    <p></p>
+                    <p id="semiMajorAxis">-</p>
                 </div>
                 <div class="param-card">
                     <h3>Эксцентриситет</h3>
-                    <p></p>
+                    <p id="eccentricity">-</p>
                 </div>
                 <div class="param-card">
                     <h3>Наклонение</h3>
-                    <p></p>
+                    <p id="inclination">-</p>
                 </div>
                 <div class="param-card">
                     <h3>Долгота узла</h3>
-                    <p></p>
+                    <p id="longitudeNode">-</p>
                 </div>
                 <div class="param-card">
                     <h3>Аргумент перицентра</h3>
-                    <p></p>
+                    <p id="argumentPerihelion">-</p>
                 </div>
             </div>
-            <button class="approach-btn">Рассчитать сближение с Землей</button>
+            <button class="approach-btn" onclick="calculateApproach()">Рассчитать сближение с Землей</button>
         </div>
 
         <div class="results-section">
@@ -82,18 +85,19 @@
             <div class="approach-results">
                 <div class="result-card">
                     <h3>Дата минимального сближения</h3>
-                    <p></p>
+                    <p id="approachDate">-</p>
                 </div>
                 <div class="result-card">
                     <h3>Расстояние до Земли</h3>
-                    <p></p>
+                    <p id="approachDistance">-</p>
                 </div>
                 <div class="result-card">
                     <h3>Статус безопасности</h3>
-                    <p class="safe-status"></p>
+                    <p id="collisionStatus" class="safe-status">-</p>
                 </div>
             </div>
         </div>
     </div>
+    <script src="main.js"></script>
 </body>
 </html>
