@@ -128,6 +128,52 @@ class CometOrbitCalculator:
                 break
         return E
 
+    def calculate_earth_distance(self, a, e, i, Omega, omega, T, jd):
+        """Расчет расстояния до Земли в заданный момент времени"""
+        def get_earth_position(jd):
+            t = (jd - 2451545.0) / 36525.0
+            M_earth = 357.52911 + 35999.05029 * t - 0.0001537 * t**2
+            C_earth = (1.914602 - 0.004817 * t - 0.000014 * t**2) * np.sin(np.radians(M_earth)) + \
+                     (0.019993 - 0.000101 * t) * np.sin(2 * np.radians(M_earth)) + \
+                     0.000289 * np.sin(3 * np.radians(M_earth))
+            nu_earth = M_earth + C_earth
+            R_earth = 1.000001018 * (1 - 0.01670862**2) / (1 + 0.01670862 * np.cos(np.radians(nu_earth)))
+            x_earth = R_earth * np.cos(np.radians(nu_earth))
+            y_earth = R_earth * np.sin(np.radians(nu_earth))
+            z_earth = 0.0
+            return np.array([x_earth, y_earth, z_earth])
+
+        # Положение кометы в гелиоцентрических координатах
+        t = jd - T
+        n = np.sqrt(self.GM_sun / a**3)
+        M = n * t
+        E = self.solve_kepler_accurate(M, e)
+        nu = 2 * np.arctan2(np.sqrt(1 + e) * np.sin(E/2), np.sqrt(1 - e) * np.cos(E/2))
+        r = a * (1 - e * np.cos(E))
+
+        i_rad = np.radians(i)
+        Omega_rad = np.radians(Omega)
+        omega_rad = np.radians(omega)
+
+        x_orb = r * np.cos(nu)
+        y_orb = r * np.sin(nu)
+
+        x_hel = (np.cos(omega_rad) * np.cos(Omega_rad) - np.sin(omega_rad) * np.sin(Omega_rad) * np.cos(i_rad)) * x_orb + \
+                (-np.sin(omega_rad) * np.cos(Omega_rad) - np.cos(omega_rad) * np.sin(Omega_rad) * np.cos(i_rad)) * y_orb
+
+        y_hel = (np.cos(omega_rad) * np.sin(Omega_rad) + np.sin(omega_rad) * np.cos(Omega_rad) * np.cos(i_rad)) * x_orb + \
+                (-np.sin(omega_rad) * np.sin(Omega_rad) + np.cos(omega_rad) * np.cos(Omega_rad) * np.cos(i_rad)) * y_orb
+
+        z_hel = (np.sin(omega_rad) * np.sin(i_rad)) * x_orb + (np.cos(omega_rad) * np.sin(i_rad)) * y_orb
+
+        # Положение Земли
+        x_earth, y_earth, z_earth = get_earth_position(jd)
+
+        # Геоцентрическое расстояние
+        distance = np.sqrt((x_hel - x_earth)**2 + (y_hel - y_earth)**2 + (z_hel - z_earth)**2)
+
+        return distance
+
 def calculate_orbit_from_observations(observations_array):
     calculator = CometOrbitCalculator()
 
@@ -136,7 +182,26 @@ def calculate_orbit_from_observations(observations_array):
         calculator.add_observation(ra, dec, datetime_str)
 
     orbital_elements = calculator.calculate_orbital_elements()
-    return orbital_elements
+
+    # Расчет даты минимального движения и расстояния
+    a, e, i, Omega, omega, T = orbital_elements
+
+    # Поиск даты минимального расстояния до Земли в ближайшие 2 года
+    start_jd = Time('2025-01-01 00:00:00').jd
+    end_jd = Time('2027-01-01 00:00:00').jd
+
+    def distance_function(jd):
+        return calculator.calculate_earth_distance(a, e, i, Omega, omega, T, jd)
+
+    # Поиск минимума расстояния
+    from scipy.optimize import minimize_scalar
+    result = minimize_scalar(distance_function, bounds=(start_jd, end_jd), method='bounded')
+
+    min_distance_jd = result.x
+    min_distance = result.fun
+    min_distance_date = Time(min_distance_jd, format='jd').datetime
+
+    return orbital_elements, min_distance_date, min_distance
 
 # ВХОДНЫЕ ДАННЫЕ из эфемерид Марса
 input_observations = [
@@ -148,7 +213,10 @@ input_observations = [
 ]
 
 if __name__ == "__main__":
-    output_elements = calculate_orbit_from_observations(input_observations)
+    output_elements, min_distance_date, min_distance = calculate_orbit_from_observations(input_observations)
 
     # Вывод в виде массива из 6 элементов
+    print("Орбитальные элементы:")
     print(output_elements)
+    print(f"\n{min_distance_date}")
+    print(f" {min_distance:.6f}")
