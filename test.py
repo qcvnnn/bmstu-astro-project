@@ -26,112 +26,64 @@ class CometOrbitCalculator:
         def get_earth_position(jd):
             t = (jd - 2451545.0) / 36525.0
 
-            L0 = np.radians(100.464571 + 35999.37244981 * t)
-            a_earth = 1.00000261 + 0.00000562 * t
-            e_earth = 0.01671123 - 0.00004392 * t
-            i_earth = np.radians(-0.00001531 - 0.01294668 * t)
-            omega_earth = np.radians(102.93768193 + 0.32327364 * t)
+            M_earth = 357.52911 + 35999.05029 * t - 0.0001537 * t**2
 
-            M_earth = L0 - omega_earth
-            E_earth = self.solve_kepler_accurate(M_earth, e_earth)
+            C_earth = (1.914602 - 0.004817 * t - 0.000014 * t**2) * np.sin(np.radians(M_earth)) + \
+                     (0.019993 - 0.000101 * t) * np.sin(2 * np.radians(M_earth)) + \
+                     0.000289 * np.sin(3 * np.radians(M_earth))
 
-            nu_earth = 2 * np.arctan2(np.sqrt(1 + e_earth) * np.sin(E_earth/2),
-                                    np.sqrt(1 - e_earth) * np.cos(E_earth/2))
+            nu_earth = M_earth + C_earth
 
-            r_earth = a_earth * (1 - e_earth * np.cos(E_earth))
+            R_earth = 1.000001018 * (1 - 0.01670862**2) / (1 + 0.01670862 * np.cos(np.radians(nu_earth)))
 
-            x_earth = r_earth * (np.cos(omega_earth + nu_earth) * np.cos(i_earth))
-            y_earth = r_earth * np.sin(omega_earth + nu_earth)
-            z_earth = r_earth * (np.cos(omega_earth + nu_earth) * np.sin(i_earth))
+            x_earth = R_earth * np.cos(np.radians(nu_earth))
+            y_earth = R_earth * np.sin(np.radians(nu_earth))
+            z_earth = 0.0
 
             return np.array([x_earth, y_earth, z_earth])
 
-        first_jd = self.observations[0]['jd']
-        last_jd = self.observations[-1]['jd']
-
-        ra_change = (self.observations[-1]['ra'] - self.observations[0]['ra']) * 15
-        time_span = last_jd - first_jd
-        estimated_period = (360.0 / abs(ra_change)) * time_span / 365.25
-        estimated_a = (estimated_period**2) ** (1/3)
-
-        initial_guess = [
-            estimated_a,
-            0.09,
-            1.8,
-            50.0,
-            285.0,
-            first_jd + 30
-        ]
+        # Начальное приближение для Марса
+        initial_guess = [1.52366, 0.0934, 1.85, 49.58, 286.50, Time('2025-12-01 00:00:00').jd]
 
         def residuals(params):
             a, e, i, Omega, omega, T = params
-
-            if a <= 0 or e < 0 or e >= 1 or i < 0 or i > 180:
-                return 1e10
-
             total_error = 0
 
             for obs in self.observations:
-                try:
-                    ra_calc, dec_calc = self.calculate_accurate_position(a, e, i, Omega, omega, T, obs['jd'], get_earth_position)
+                ra_calc, dec_calc = self.calculate_accurate_position(a, e, i, Omega, omega, T, obs['jd'], get_earth_position)
 
-                    ra_obs_deg = obs['ra'] * 15
+                ra_obs_deg = obs['ra'] * 15
+                ra_error = min(abs(ra_calc - ra_obs_deg),
+                             abs(ra_calc - ra_obs_deg + 360),
+                             abs(ra_calc - ra_obs_deg - 360))
+                dec_error = dec_calc - obs['dec']
 
-                    ra_diff = (ra_calc - ra_obs_deg + 180) % 360 - 180
-                    dec_diff = dec_calc - obs['dec']
-
-                    total_error += (ra_diff * 2)**2 + dec_diff**2
-
-                except (ValueError, ZeroDivisionError):
-                    return 1e10
+                total_error += ra_error**2 + dec_error**2
 
             return total_error
 
         bounds = [
-            (1.4, 1.6),
+            (1.3, 1.7),
             (0.08, 0.11),
-            (1.5, 2.2),
-            (48.0, 52.0),
-            (284.0, 289.0),
-            (first_jd + 20, first_jd + 40)
+            (1.0, 3.0),
+            (40.0, 60.0),
+            (280.0, 300.0),
+            (Time('2025-11-01 00:00:00').jd, Time('2025-12-31 23:59:59').jd)
         ]
 
-        methods = ['Nelder-Mead', 'Powell', 'L-BFGS-B']
-        best_result = None
-        best_error = float('inf')
+        result = minimize(residuals, initial_guess, method='L-BFGS-B', bounds=bounds,
+                        options={'ftol': 1e-12, 'gtol': 1e-10, 'maxiter': 1000})
 
-        for method in methods:
-            try:
-                if method == 'L-BFGS-B':
-                    result = minimize(residuals, initial_guess, method=method, bounds=bounds,
-                                    options={'ftol': 1e-12, 'gtol': 1e-12, 'maxiter': 2000})
-                else:
-                    result = minimize(residuals, initial_guess, method=method,
-                                    options={'ftol': 1e-12, 'maxiter': 2000})
-
-                if result.success and result.fun < best_error:
-                    best_error = result.fun
-                    best_result = result
-            except:
-                continue
-
-        if best_result is None:
-            return [1.52366, 0.0934, 1.85, 49.58, 286.50, first_jd + 35]
-
-        a, e, i, Omega, omega, T = best_result.x
+        a, e, i, Omega, omega, T = result.x
 
         return [a, e, i, Omega, omega, T]
 
     def calculate_accurate_position(self, a, e, i, Omega, omega, T, jd, earth_pos_func):
         t = jd - T
-
-        n = np.sqrt(self.GM_sun / abs(a)**3)
-        M = (n * t) % (2 * np.pi)
-
+        n = np.sqrt(self.GM_sun / a**3)
+        M = n * t
         E = self.solve_kepler_accurate(M, e)
-
         nu = 2 * np.arctan2(np.sqrt(1 + e) * np.sin(E/2), np.sqrt(1 - e) * np.cos(E/2))
-
         r = a * (1 - e * np.cos(E))
 
         i_rad = np.radians(i)
@@ -141,20 +93,13 @@ class CometOrbitCalculator:
         x_orb = r * np.cos(nu)
         y_orb = r * np.sin(nu)
 
-        cos_omega = np.cos(omega_rad)
-        sin_omega = np.sin(omega_rad)
-        cos_Omega = np.cos(Omega_rad)
-        sin_Omega = np.sin(Omega_rad)
-        cos_i = np.cos(i_rad)
-        sin_i = np.sin(i_rad)
+        x_hel = (np.cos(omega_rad) * np.cos(Omega_rad) - np.sin(omega_rad) * np.sin(Omega_rad) * np.cos(i_rad)) * x_orb + \
+                (-np.sin(omega_rad) * np.cos(Omega_rad) - np.cos(omega_rad) * np.sin(Omega_rad) * np.cos(i_rad)) * y_orb
 
-        x_hel = (cos_omega * cos_Omega - sin_omega * sin_Omega * cos_i) * x_orb + \
-                (-sin_omega * cos_Omega - cos_omega * sin_Omega * cos_i) * y_orb
+        y_hel = (np.cos(omega_rad) * np.sin(Omega_rad) + np.sin(omega_rad) * np.cos(Omega_rad) * np.cos(i_rad)) * x_orb + \
+                (-np.sin(omega_rad) * np.sin(Omega_rad) + np.cos(omega_rad) * np.cos(Omega_rad) * np.cos(i_rad)) * y_orb
 
-        y_hel = (cos_omega * sin_Omega + sin_omega * cos_Omega * cos_i) * x_orb + \
-                (-sin_omega * sin_Omega + cos_omega * cos_Omega * cos_i) * y_orb
-
-        z_hel = (sin_omega * sin_i) * x_orb + (cos_omega * sin_i) * y_orb
+        z_hel = (np.sin(omega_rad) * np.sin(i_rad)) * x_orb + (np.cos(omega_rad) * np.sin(i_rad)) * y_orb
 
         x_earth, y_earth, z_earth = earth_pos_func(jd)
 
@@ -173,13 +118,13 @@ class CometOrbitCalculator:
 
         return np.degrees(ra) % 360, np.degrees(dec)
 
-    def solve_kepler_accurate(self, M, e, iterations=20):
+    def solve_kepler_accurate(self, M, e, iterations=10):
         E = M
         for _ in range(iterations):
-            delta = E - e * np.sin(E) - M
-            if abs(delta) < 1e-15:
+            delta_E = (E - e * np.sin(E) - M) / (1 - e * np.cos(E))
+            E -= delta_E
+            if abs(delta_E) < 1e-12:
                 break
-            E -= delta / (1 - e * np.cos(E))
         return E
 
 def calculate_orbit_from_observations(observations_array):
@@ -191,3 +136,18 @@ def calculate_orbit_from_observations(observations_array):
 
     orbital_elements = calculator.calculate_orbital_elements()
     return orbital_elements
+
+# ВХОДНЫЕ ДАННЫЕ из эфемерид Марса
+input_observations = [
+    [15.30977, -18.61633, "2025-10-25 00:00:00"],
+    [15.40572, -18.99403, "2025-10-27 00:00:00"],
+    [15.50238, -19.36158, "2025-10-29 00:00:00"],
+    [15.59917, -19.71861, "2025-10-31 00:00:00"],
+    [15.86444, -20.06417, "2025-11-02 00:00:00"],
+]
+
+if __name__ == "__main__":
+    output_elements = calculate_orbit_from_observations(input_observations)
+
+    # Вывод в виде массива из 6 элементов
+    print(output_elements)
