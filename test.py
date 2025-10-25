@@ -109,6 +109,7 @@ class CometOrbitCalculator:
 
         eps = np.radians(23.4392911)
 
+
         x_eq = x_geo
         y_eq = y_geo * np.cos(eps) - z_geo * np.sin(eps)
         z_eq = y_geo * np.sin(eps) + z_geo * np.cos(eps)
