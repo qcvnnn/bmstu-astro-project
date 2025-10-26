@@ -23,15 +23,15 @@
                 <div class="point-row">
                     <div class="point-label">Точка 2:</div>
                     <input type="datetime-local" id="time2">
-                    <input type="number" id="ra2" placeholder="Прямое восхождение (часы)" step="0.1" >
-                    <input type="number" id="dec2" placeholder="Склонение (градусы)" step="0.1" >
+                    <input type="number" id="ra2" placeholder="Прямое восхождение (часы)" step="0.1">
+                    <input type="number" id="dec2" placeholder="Склонение (градусы)" step="0.1">
                 </div>
 
                 <div class="point-row">
                     <div class="point-label">Точка 3:</div>
-                    <input type="datetime-local" id="time3" >
-                    <input type="number" id="ra3" placeholder="Прямое восхождение (часы)" step="0.1" >
-                    <input type="number" id="dec3" placeholder="Склонение (градусы)" step="0.1" >
+                    <input type="datetime-local" id="time3">
+                    <input type="number" id="ra3" placeholder="Прямое восхождение (часы)" step="0.1">
+                    <input type="number" id="dec3" placeholder="Склонение (градусы)" step="0.1">
                 </div>
 
                 <div class="point-row">
@@ -50,7 +50,7 @@
             </div>
 
             <button onclick="addPoint()">+ Добавить точку</button>
-            <button onclick="sendToServer()">Рассчитать параметры орбиты</button>
+            <button onclick="calculateOrbit()">Рассчитать параметры орбиты</button>
         </div>
 
         <div class="results-section">
@@ -59,27 +59,36 @@
                 <div class="param-card">
                     <h3>Большая полуось</h3>
                     <p id="semiMajorAxis">-</p>
+                    <span class="param-unit"></span>
                 </div>
                 <div class="param-card">
                     <h3>Эксцентриситет</h3>
                     <p id="eccentricity">-</p>
+                    <span class="param-unit">-</span>
                 </div>
                 <div class="param-card">
                     <h3>Наклонение</h3>
                     <p id="inclination">-</p>
+                    <span class="param-unit"></span>
                 </div>
                 <div class="param-card">
                     <h3>Долгота узла</h3>
                     <p id="longitudeNode">-</p>
+                    <span class="param-unit"></span>
                 </div>
                 <div class="param-card">
                     <h3>Аргумент перицентра</h3>
                     <p id="argumentPerihelion">-</p>
+                    <span class="param-unit"></span>
+                </div>
+                <div class="param-card">
+                    <h3>Положение на эллипсе</h3>
+                    <p id="trueAnomaly">-</p>
+                    <span class="param-unit"></span>
                 </div>
             </div>
             <button class="approach-btn" onclick="calculateApproach()">Рассчитать сближение с Землей</button>
         </div>
-
         <div class="results-section">
             <h2>Сближение с Землей:</h2>
             <div class="approach-results">
@@ -90,6 +99,7 @@
                 <div class="result-card">
                     <h3>Расстояние до Земли</h3>
                     <p id="approachDistance">-</p>
+                    <span class="param-unit"></span>
                 </div>
                 <div class="result-card">
                     <h3>Статус безопасности</h3>

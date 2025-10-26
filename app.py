@@ -5,6 +5,8 @@ from astropy.coordinates import SkyCoord
 from astropy.time import Time
 from astropy import units as u
 from scipy.optimize import minimize
+import sqlite3
+import json
 
 app = Flask(__name__)
 CORS(app)
@@ -15,6 +17,22 @@ def after_request(response):
     response.headers.add('Access-Control-Allow-Methods', 'GET,PUT,POST,DELETE,OPTIONS')
     return response
 
+def init_db():
+    conn = sqlite3.connect('planets.db')
+    cursor = conn.cursor()
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS planets (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL,
+            observations TEXT NOT NULL,
+            orbital_elements TEXT NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+    conn.commit()
+    conn.close()
+
+init_db()
 
 class CometOrbitCalculator:
     def __init__(self):
@@ -138,6 +156,38 @@ class CometOrbitCalculator:
                 break
         return E
 
+    def calculate_true_anomaly(self, orbital_elements, observation_times=None):
+        """
+        Расчет истинной аномалии для набора времен наблюдений
+        orbital_elements: [a, e, i, Omega, omega, T]
+        observation_times: список JD времен наблюдений (если None, используем последнее наблюдение)
+        """
+        a, e, i, Omega, omega, T = orbital_elements
+
+        if observation_times is None:
+            # Используем JD последнего наблюдения
+            if self.observations:
+                observation_times = [self.observations[-1]['jd']]
+            else:
+                return 0.0
+
+        # Расчет для последнего времени наблюдения
+        jd = observation_times[-1] if isinstance(observation_times, list) else observation_times
+
+        # Среднее движение
+        n = np.sqrt(self.GM_sun / a**3)
+
+        # Средняя аномалия
+        M = n * (jd - T)
+
+        # Эксцентрическая аномалия (решение уравнения Кеплера)
+        E = self.solve_kepler_accurate(M, e)
+
+        # Истинная аномалия
+        nu = 2 * np.arctan2(np.sqrt(1 + e) * np.sin(E/2), np.sqrt(1 - e) * np.cos(E/2))
+
+        return np.degrees(nu)
+
 def calculate_orbit_from_observations(observations_array):
     calculator = CometOrbitCalculator()
     for obs in observations_array:
@@ -145,6 +195,89 @@ def calculate_orbit_from_observations(observations_array):
         calculator.add_observation(ra, dec, datetime_str)
     orbital_elements = calculator.calculate_orbital_elements()
     return orbital_elements
+
+@app.route('/api/planets', methods=['GET'])
+def get_planets():
+    try:
+        conn = sqlite3.connect('planets.db')
+        cursor = conn.cursor()
+        cursor.execute('SELECT id, name, observations, orbital_elements, created_at FROM planets ORDER BY created_at DESC')
+        planets = cursor.fetchall()
+        conn.close()
+
+        result = []
+        for planet in planets:
+            result.append({
+                'id': planet[0],
+                'name': planet[1],
+                'observations': json.loads(planet[2]),
+                'orbital_elements': json.loads(planet[3]),
+                'created_at': planet[4]
+            })
+
+        return jsonify({
+            "success": True,
+            "planets": result
+        })
+    except Exception as e:
+        return jsonify({
+            "success": False,
+            "error": str(e)
+        }), 500
+
+@app.route('/api/planets', methods=['POST'])
+def save_planet():
+    try:
+        data = request.json
+        name = data.get('name', '')
+        observations = data.get('observations', [])
+        orbital_elements = data.get('orbital_elements', {})
+
+        if not name:
+            return jsonify({
+                "success": False,
+                "error": "Name is required"
+            }), 400
+
+        conn = sqlite3.connect('planets.db')
+        cursor = conn.cursor()
+        cursor.execute(
+            'INSERT INTO planets (name, observations, orbital_elements) VALUES (?, ?, ?)',
+            (name, json.dumps(observations), json.dumps(orbital_elements))
+        )
+        conn.commit()
+        planet_id = cursor.lastrowid
+        conn.close()
+
+        return jsonify({
+            "success": True,
+            "planet_id": planet_id,
+            "message": "Planet saved successfully"
+        })
+    except Exception as e:
+        return jsonify({
+            "success": False,
+            "error": str(e)
+        }), 500
+
+@app.route('/api/planets/<int:planet_id>', methods=['DELETE'])
+def delete_planet(planet_id):
+    try:
+        conn = sqlite3.connect('planets.db')
+        cursor = conn.cursor()
+        cursor.execute('DELETE FROM planets WHERE id = ?', (planet_id,))
+        conn.commit()
+        conn.close()
+
+        return jsonify({
+            "success": True,
+            "message": "Planet deleted successfully"
+        })
+    except Exception as e:
+        return jsonify({
+            "success": False,
+            "error": str(e)
+        }), 500
 
 @app.route('/api/calculate-orbit', methods=['POST'])
 def calculate_orbit():
@@ -162,7 +295,19 @@ def calculate_orbit():
                 obs['time']
             ])
 
-        orbital_elements = calculate_orbit_from_observations(observations_array)
+        # Создаем калькулятор и рассчитываем элементы
+        calculator = CometOrbitCalculator()
+        for obs in observations_array:
+            calculator.add_observation(obs[0], obs[1], obs[2])
+
+        orbital_elements = calculator.calculate_orbital_elements()
+
+        # РАСЧЕТ ИСТИННОЙ АНОМАЛИИ ДЛЯ ПОСЛЕДНЕГО НАБЛЮДЕНИЯ
+        if calculator.observations:
+            observation_jds = [obs['jd'] for obs in calculator.observations]
+            true_anomaly = calculator.calculate_true_anomaly(orbital_elements, observation_jds)
+        else:
+            true_anomaly = 0.0
 
         result = {
             "success": True,
@@ -172,8 +317,9 @@ def calculate_orbit():
                 "inclination": float(round(orbital_elements[2], 6)),
                 "longitude_ascending": float(round(orbital_elements[3], 6)),
                 "argument_pericenter": float(round(orbital_elements[4], 6)),
-                "time_perihelion": "2024-06-15T00:00:00"
-                }
+                "time_perihelion": float(round(orbital_elements[5], 6)),
+                "true_anomaly": float(round(true_anomaly, 6))  # ДОБАВЛЯЕМ ИСТИННУЮ АНОМАЛИЮ
+            }
         }
 
         print("📤 Отправляем результат:", result)
