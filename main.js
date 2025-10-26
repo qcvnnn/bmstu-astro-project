@@ -1,7 +1,248 @@
 let pointCounter = 5;
 let currentOrbitData = null;
+let currentCometId = null;
+let cometsListVisible = false;
 
-// Функции для работы с изображениями
+// ФУНКЦИИ ДЛЯ УПРАВЛЕНИЯ КОМЕТАМИ
+
+function toggleCometsList() {
+    const cometsList = document.getElementById('cometsList');
+    cometsListVisible = !cometsListVisible;
+
+    if (cometsListVisible) {
+        cometsList.style.display = 'block';
+        loadComets();
+    } else {
+        cometsList.style.display = 'none';
+    }
+}
+
+async function loadComets() {
+    try {
+        const response = await fetch('http://127.0.0.1:5001/api/planets');
+        const result = await response.json();
+
+        if (result.success) {
+            displayComets(result.planets);
+        } else {
+            showNotification('❌ Ошибка загрузки комет: ' + result.error, 'error');
+        }
+    } catch (error) {
+        showNotification('❌ Ошибка соединения: ' + error.message, 'error');
+    }
+}
+
+function displayComets(comets) {
+    const cometsContainer = document.getElementById('comets-list-container');
+    cometsContainer.innerHTML = '';
+
+    if (comets.length === 0) {
+        cometsContainer.innerHTML = '<p style="text-align: center; color: #666; padding: 20px;">Нет сохраненных комет</p>';
+        return;
+    }
+
+    comets.forEach(comet => {
+        const cometElement = document.createElement('div');
+        cometElement.className = 'comet-card';
+
+        const imageHtml = comet.image_data ?
+            `<img src="${comet.image_data}" alt="${comet.name}" class="comet-image">` :
+            '<div class="comet-no-image">🌠</div>';
+
+        cometElement.innerHTML = `
+            ${imageHtml}
+            <div class="comet-info">
+                <div class="comet-name">${comet.name}</div>
+                <div class="comet-details">
+                    Наблюдений: ${comet.observations.length} |
+                    Создана: ${new Date(comet.created_at).toLocaleDateString()}
+                </div>
+            </div>
+            <div class="comet-actions">
+                <button class="load-comet-btn" onclick="loadCometData(${comet.id})">📊 Загрузить</button>
+                <button class="delete-comet-btn" onclick="deleteComet(${comet.id})">🗑️ Удалить</button>
+            </div>
+        `;
+
+        cometsContainer.appendChild(cometElement);
+    });
+}
+
+async function loadCometData(cometId) {
+    try {
+        const response = await fetch('http://127.0.0.1:5001/api/planets');
+        const result = await response.json();
+
+        if (result.success) {
+            const comet = result.planets.find(p => p.id === cometId);
+            if (comet) {
+                // Заполняем данные кометы в поля формы
+                fillObservations(comet.observations);
+                fillOrbitResults(comet.orbital_elements);
+
+                // Загружаем изображение
+                if (comet.image_data) {
+                    loadCometImage(comet.image_data);
+                } else {
+                    removeImage();
+                }
+
+                currentCometId = cometId;
+
+                showNotification(`✅ Данные кометы "${comet.name}" загружены`, 'success');
+                // НЕ закрываем список комет
+            }
+        }
+    } catch (error) {
+        showNotification('❌ Ошибка загрузки данных: ' + error.message, 'error');
+    }
+}
+
+async function deleteComet(cometId) {
+    if (!confirm('Удалить эту комету?')) return;
+
+    try {
+        const response = await fetch(`http://127.0.0.1:5001/api/planets/${cometId}`, {
+            method: 'DELETE'
+        });
+        const result = await response.json();
+
+        if (result.success) {
+            showNotification('🗑️ Комета удалена', 'success');
+            // Просто обновляем список, не закрывая его
+            loadComets();
+        } else {
+            showNotification('❌ Ошибка удаления: ' + result.error, 'error');
+        }
+    } catch (error) {
+        showNotification('❌ Ошибка соединения: ' + error.message, 'error');
+    }
+}
+
+function fillObservations(observations) {
+    // Очищаем существующие точки
+    const pointsContainer = document.getElementById('points-container');
+    pointsContainer.innerHTML = '';
+    pointCounter = 0;
+
+    // Добавляем точки из наблюдений
+    observations.forEach((obs, index) => {
+        pointCounter++;
+        const newPoint = document.createElement('div');
+        newPoint.className = 'point-row';
+        newPoint.innerHTML = `
+            <div class="point-label">Точка ${pointCounter}:</div>
+            <input type="datetime-local" id="time${pointCounter}" value="${obs.time.replace(' ', 'T')}">
+            <input type="number" id="ra${pointCounter}" placeholder="Прямое восхождение (часы)" step="0.1" value="${obs.ra}">
+            <input type="number" id="dec${pointCounter}" placeholder="Склонение (градусы)" step="0.1" value="${obs.dec}">
+        `;
+        pointsContainer.appendChild(newPoint);
+    });
+}
+
+function fillOrbitResults(orbit) {
+    document.getElementById('semiMajorAxis').textContent = orbit.semi_major_axis;
+    document.getElementById('eccentricity').textContent = orbit.eccentricity;
+    document.getElementById('inclination').textContent = orbit.inclination;
+    document.getElementById('longitudeNode').textContent = orbit.longitude_ascending;
+    document.getElementById('argumentPerihelion').textContent = orbit.argument_pericenter;
+    document.getElementById('trueAnomaly').textContent = orbit.true_anomaly;
+
+    currentOrbitData = orbit;
+}
+
+function loadCometImage(imageData) {
+    const imagePreview = document.getElementById('imagePreview');
+    if (imageData && imagePreview) {
+        imagePreview.innerHTML = '';
+        const img = document.createElement('img');
+        img.src = imageData;
+        img.alt = 'Изображение кометы';
+        imagePreview.appendChild(img);
+
+        // Сохраняем в localStorage для текущей сессии
+        localStorage.setItem('cometImage', imageData);
+    }
+}
+
+async function saveCometFinal() {
+    const cometName = prompt('Введите название кометы:');
+    if (!cometName || !cometName.trim()) {
+        showNotification('❌ Название кометы обязательно', 'error');
+        return;
+    }
+
+    // Проверяем, существует ли уже комета с таким названием
+    const isDuplicate = await checkDuplicateComet(cometName.trim());
+    if (isDuplicate) {
+        showNotification('❌ Комета с таким названием уже существует', 'error');
+        return;
+    }
+
+    await saveCometToDatabase(cometName.trim());
+}
+
+async function checkDuplicateComet(cometName) {
+    try {
+        const response = await fetch('http://127.0.0.1:5001/api/planets');
+        const result = await response.json();
+
+        if (result.success) {
+            const existingComet = result.planets.find(comet =>
+                comet.name.toLowerCase() === cometName.toLowerCase()
+            );
+            return !!existingComet;
+        }
+        return false;
+    } catch (error) {
+        console.error('Ошибка проверки дубликата:', error);
+        return false;
+    }
+}
+
+async function saveCometToDatabase(cometName) {
+    const observations = collectObservationData();
+    if (observations.length < 5) {
+        showNotification('❌ Нужно минимум 5 наблюдений для сохранения', 'error');
+        return;
+    }
+
+    if (!currentOrbitData) {
+        showNotification('❌ Сначала рассчитайте параметры орбиты', 'error');
+        return;
+    }
+
+    // Получаем изображение из localStorage
+    const imageData = localStorage.getItem('cometImage') || '';
+
+    try {
+        const response = await fetch('http://127.0.0.1:5001/api/planets', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                name: cometName,
+                observations: observations,
+                orbital_elements: currentOrbitData,
+                image_data: imageData
+            })
+        });
+
+        const result = await response.json();
+
+        if (result.success) {
+            showNotification(`✅ Комета "${cometName}" сохранена! ID: ${result.planet_id}`, 'success');
+            loadComets(); // Обновляем список комет
+        } else {
+            showNotification('❌ Ошибка сохранения: ' + result.error, 'error');
+        }
+    } catch (error) {
+        showNotification('❌ Ошибка соединения: ' + error.message, 'error');
+    }
+}
+
+// ФУНКЦИИ ДЛЯ РАБОТЫ С ИЗОБРАЖЕНИЯМИ
 function initImageUpload() {
     const imageUpload = document.getElementById('imageUpload');
     const imagePreview = document.getElementById('imagePreview');
@@ -81,7 +322,7 @@ function removeImage() {
 
     imagePreview.innerHTML = `
         <div class="placeholder-content">
-            <div class="placeholder-icon"></div>
+            <div class="placeholder-icon">🛸</div>
             <p>Перетащите сюда изображение<br>или нажмите кнопку ниже</p>
         </div>
     `;
@@ -90,7 +331,7 @@ function removeImage() {
     // Удаляем из localStorage
     localStorage.removeItem('cometImage');
 
-    showNotification('🗑 Изображение удалено', 'info');
+    showNotification('🗑️ Изображение удалено', 'info');
 }
 
 function restoreImage() {
@@ -132,244 +373,17 @@ function showNotification(message, type) {
     setTimeout(() => {
         notification.style.transform = 'translateX(0)';
     }, 100);
-        // Автоматическое скрытие
+
+    // Автоматическое скрытие
+    setTimeout(() => {
+        notification.style.transform = 'translateX(100%)';
         setTimeout(() => {
-          notification.style.transform = 'translateX(100%)';
-          setTimeout(() => {
-              document.body.removeChild(notification);
-          }, 300);
-      }, 3000);
-  }
-
-// ФУНКЦИИ ДЛЯ РАБОТЫ С БАЗОЙ ДАННЫХ ПЛАНЕТ
-
-async function loadPlanets() {
-    try {
-        const response = await fetch('http://127.0.0.1:5001/api/planets');
-        const result = await response.json();
-
-        if (result.success) {
-            displayPlanets(result.planets);
-        } else {
-            alert('Ошибка загрузки планет: ' + result.error);
-        }
-    } catch (error) {
-        alert('Ошибка соединения: ' + error.message);
-    }
+            document.body.removeChild(notification);
+        }, 300);
+    }, 3000);
 }
 
-function displayPlanets(planets) {
-  const planetsList = document.getElementById('planets-list');
-  planetsList.innerHTML = '';
-
-  if (planets.length === 0) {
-      planetsList.innerHTML = '<p style="text-align: center; color: #666; padding: 20px;">Нет сохраненных планет</p>';
-      return;
-  }
-
-  planets.forEach(planet => {
-      const planetElement = document.createElement('div');
-      planetElement.className = 'planet-card';
-
-      // ДОБАВЛЯЕМ ПРЕВЬЮ ИЗОБРАЖЕНИЯ
-      const imagePreview = planet.image_data ?
-          `<div class="planet-image-preview">
-              <img src="${planet.image_data}" alt="${planet.name}" onclick="showFullImage('${planet.image_data}')">
-          </div>` :
-          '<div class="planet-no-image">📷 Нет изображения</div>';
-
-      planetElement.innerHTML = `
-          <div class="planet-header">
-              <h3>${planet.name}</h3>
-              <button class="delete-btn" onclick="deletePlanet(${planet.id})">🗑️ Удалить</button>
-          </div>
-          ${imagePreview}
-          <div class="planet-info">
-              <p><strong>Наблюдения:</strong> ${planet.observations.length} точек</p>
-              <p><strong>Большая полуось:</strong> ${planet.orbital_elements.semi_major_axis} а.е.</p>
-              <p><strong>Эксцентриситет:</strong> ${planet.orbital_elements.eccentricity}</p>
-              <p><strong>Создана:</strong> ${new Date(planet.created_at).toLocaleString()}</p>
-          </div>
-          <button class="load-btn" onclick="loadPlanetData(${planet.id})">📊 Загрузить данные</button>
-      `;
-      planetsList.appendChild(planetElement);
-  });
-}
-
-// ФУНКЦИЯ ДЛЯ ПОКАЗА ИЗОБРАЖЕНИЯ В ПОЛНОМ РАЗМЕРЕ
-function showFullImage(imageData) {
-  const modal = document.createElement('div');
-  modal.style.cssText = `
-      position: fixed;
-      top: 0;
-      left: 0;
-      width: 100%;
-      height: 100%;
-      background: rgba(0,0,0,0.8);
-      display: flex;
-      justify-content: center;
-      align-items: center;
-      z-index: 1000;
-      cursor: pointer;
-  `;
-
-  const img = document.createElement('img');
-  img.src = imageData;
-  img.style.cssText = `
-      max-width: 90%;
-      max-height: 90%;
-      object-fit: contain;
-      border-radius: 10px;
-  `;
-
-  modal.appendChild(img);
-  modal.onclick = () => document.body.removeChild(modal);
-  document.body.appendChild(modal);
-}
-
-async function deletePlanet(planetId) {
-    if (!confirm('Удалить эту планету?')) return;
-
-    try {
-        const response = await fetch(`http://127.0.0.1:5001/api/planets/${planetId}`, {
-            method: 'DELETE'
-        });
-        const result = await response.json();
-
-        if (result.success) {
-            alert('Планета удалена');
-            loadPlanets();
-        } else {
-            alert('Ошибка удаления: ' + result.error);
-        }
-    } catch (error) {
-        alert('Ошибка соединения: ' + error.message);
-    }
-}
-
-async function loadPlanetData(planetId) {
-  try {
-      const response = await fetch('http://127.0.0.1:5001/api/planets');
-      const result = await response.json();
-
-      if (result.success) {
-          const planet = result.planets.find(p => p.id === planetId);
-          if (planet) {
-              // Заполняем поля наблюдениями
-              fillObservations(planet.observations);
-              // Заполняем результаты орбиты
-              fillOrbitResults(planet.orbital_elements);
-              // ЗАГРУЖАЕМ ИЗОБРАЖЕНИЕ
-              if (planet.image_data) {
-                  loadPlanetImage(planet.image_data);
-              } else {
-                  removeImage(); // Очищаем если нет изображения
-              }
-              alert(`✅ Данные планеты "${planet.name}" загружены`);
-          }
-      }
-  } catch (error) {
-      alert('Ошибка загрузки данных: ' + error.message);
-  }
-}
-
-function loadPlanetImage(imageData) {
-  const imagePreview = document.getElementById('imagePreview');
-  if (imageData && imagePreview) {
-      imagePreview.innerHTML = '';
-      const img = document.createElement('img');
-      img.src = imageData;
-      img.alt = 'Изображение кометы';
-      imagePreview.appendChild(img);
-
-      // Сохраняем в localStorage для текущей сессии
-      localStorage.setItem('cometImage', imageData);
-  }
-}
-
-function fillObservations(observations) {
-    // Очищаем существующие точки
-    const pointsContainer = document.getElementById('points-container');
-    pointsContainer.innerHTML = '';
-    pointCounter = 0;
-
-    // Добавляем точки из наблюдений
-    observations.forEach((obs, index) => {
-        pointCounter++;
-        const newPoint = document.createElement('div');
-        newPoint.className = 'point-row';
-        newPoint.innerHTML = `
-            <div class="point-label">Точка ${pointCounter}:</div>
-            <input type="datetime-local" id="time${pointCounter}" value="${obs.time.replace(' ', 'T')}">
-            <input type="number" id="ra${pointCounter}" placeholder="Прямое восхождение (часы)" step="0.1" value="${obs.ra}">
-            <input type="number" id="dec${pointCounter}" placeholder="Склонение (градусы)" step="0.1" value="${obs.dec}">
-        `;
-        pointsContainer.appendChild(newPoint);
-    });
-}
-
-function fillOrbitResults(orbit) {
-    document.getElementById('semiMajorAxis').textContent = orbit.semi_major_axis;
-    document.getElementById('eccentricity').textContent = orbit.eccentricity;
-    document.getElementById('inclination').textContent = orbit.inclination;
-    document.getElementById('longitudeNode').textContent = orbit.longitude_ascending;
-    document.getElementById('argumentPerihelion').textContent = orbit.argument_pericenter;
-    document.getElementById('trueAnomaly').textContent = orbit.true_anomaly;
-
-    currentOrbitData = orbit;
-}
-
-async function savePlanet() {
-  const name = document.getElementById('planetName').value.trim();
-  if (!name) {
-      alert('Введите название планеты');
-      return;
-  }
-
-  const observations = collectObservationData();
-  if (observations.length < 5) {
-      alert('Нужно минимум 5 наблюдений для сохранения');
-      return;
-  }
-
-  if (!currentOrbitData) {
-      alert('Сначала рассчитайте параметры орбиты');
-      return;
-  }
-
-  // ПОЛУЧАЕМ ИЗОБРАЖЕНИЕ ИЗ LOCALSTORAGE
-  const imageData = localStorage.getItem('cometImage') || '';
-
-  try {
-      const response = await fetch('http://127.0.0.1:5001/api/planets', {
-          method: 'POST',
-          headers: {
-              'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-              name: name,
-              observations: observations,
-              orbital_elements: currentOrbitData,
-              image_data: imageData  // ДОБАВЛЯЕМ ИЗОБРАЖЕНИЕ
-          })
-      });
-
-      const result = await response.json();
-
-      if (result.success) {
-          alert('✅ Планета сохранена! ID: ' + result.planet_id);
-          document.getElementById('planetName').value = '';
-          loadPlanets();
-      } else {
-          alert('Ошибка сохранения: ' + result.error);
-      }
-  } catch (error) {
-      alert('Ошибка соединения: ' + error.message);
-  }
-}
-
-// СУЩЕСТВУЮЩИЕ ФУНКЦИИ (оставляем без изменений)
-
+// ОСНОВНЫЕ ФУНКЦИИ ПРИЛОЖЕНИЯ
 function addPoint() {
     pointCounter++;
 
@@ -457,13 +471,13 @@ async function calculateOrbit() {
             document.getElementById('trueAnomaly').textContent = result.orbit.true_anomaly?.toFixed(6) || '-';
 
             currentOrbitData = result.orbit;
-            alert('✅ Орбитальные параметры успешно рассчитаны!');
+            showNotification('✅ Орбитальные параметры успешно рассчитаны!', 'success');
         } else {
-            alert('Ошибка сервера: ' + result.error);
+            showNotification('❌ Ошибка сервера: ' + result.error, 'error');
         }
     } catch (error) {
         console.error("Полная ошибка:", error);
-        alert('Ошибка соединения: ' + error.message);
+        showNotification('❌ Ошибка соединения: ' + error.message, 'error');
     }
 }
 
@@ -472,7 +486,7 @@ async function calculateApproach() {
     const eccentricity = document.getElementById('eccentricity').textContent;
 
     if (semiMajorAxis === '-' || eccentricity === '-') {
-        alert('Сначала рассчитайте параметры орбиты!');
+        showNotification('❌ Сначала рассчитайте параметры орбиты!', 'error');
         return;
     }
 
@@ -504,28 +518,23 @@ async function calculateApproach() {
             document.getElementById('collisionStatus').textContent = result.approach.is_safe ? 'Безопасно' : 'Опасно!';
             document.getElementById('collisionStatus').className = result.approach.is_safe ? 'safe-status' : 'danger-status';
 
-            alert('✅ Сближение с Землей рассчитано!');
+            showNotification('✅ Сближение с Землей рассчитано!', 'success');
         } else {
-            alert('Ошибка: ' + result.error);
+            showNotification('❌ Ошибка: ' + result.error, 'error');
         }
     } catch (error) {
-        alert('Ошибка соединения с сервером: ' + error.message);
+        showNotification('❌ Ошибка соединения с сервером: ' + error.message, 'error');
     }
 }
 
-
-
+// ИНИЦИАЛИЗАЦИЯ ПРИ ЗАГРУЗКЕ СТРАНИЦЫ
 document.addEventListener('DOMContentLoaded', function() {
-  // Создаем 5 пустых точек при загрузке
-  for (let i = 4; i <= 5; i++) {
-      addPoint();
-  }
+    // Инициализируем загрузку изображений
+    initImageUpload();
 
-  // Инициализируем загрузку изображений
-  initImageUpload();
+    // Восстанавливаем сохраненное изображение
+    restoreImage();
 
-  // Восстанавливаем сохраненное изображение
-  restoreImage();
-
-  loadPlanets(); // Загружаем список планет при запуске
+    // Загружаем список комет при запуске (но не показываем)
+    loadComets();
 });

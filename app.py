@@ -374,6 +374,35 @@ def calculate_approach():
             "error": str(e)
         }), 500
 
+@app.route('/api/check-duplicate', methods=['POST'])
+def check_duplicate():
+    try:
+        data = request.json
+        name = data.get('name', '').strip().lower()
+
+        if not name:
+            return jsonify({
+                "success": False,
+                "error": "Name is required"
+            }), 400
+
+        conn = sqlite3.connect('planets.db')
+        cursor = conn.cursor()
+        cursor.execute('SELECT id FROM planets WHERE LOWER(name) = ?', (name,))
+        existing_planet = cursor.fetchone()
+        conn.close()
+
+        return jsonify({
+            "success": True,
+            "is_duplicate": existing_planet is not None
+        })
+
+    except Exception as e:
+        return jsonify({
+            "success": False,
+            "error": str(e)
+        }), 500
+
 @app.route('/')
 def home():
     return jsonify({
