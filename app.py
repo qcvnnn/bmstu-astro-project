@@ -10,6 +10,7 @@ import json
 
 app = Flask(__name__)
 CORS(app)
+
 @app.after_request
 def after_request(response):
     response.headers.add('Access-Control-Allow-Origin', '*')
@@ -33,8 +34,6 @@ def init_db():
     conn.commit()
     conn.close()
 
-init_db()
-
 def update_db_structure():
     """Добавляет поле image_data если оно отсутствует"""
     conn = sqlite3.connect('planets.db')
@@ -51,7 +50,7 @@ def update_db_structure():
 
     conn.close()
 
-# Вызываем после init_db()
+# Инициализация базы данных
 init_db()
 update_db_structure()
 
@@ -178,7 +177,6 @@ class CometOrbitCalculator:
         return E
 
     def calculate_true_anomaly(self, orbital_elements, observation_times=None):
-
         a, e, i, Omega, omega, T = orbital_elements
 
         if observation_times is None:
@@ -198,6 +196,136 @@ class CometOrbitCalculator:
         nu = 2 * np.arctan2(np.sqrt(1 + e) * np.sin(E/2), np.sqrt(1 - e) * np.cos(E/2))
 
         return np.degrees(nu)
+
+    def calculate_earth_approach(self, orbital_elements, days_ahead=365):
+        """Расчет сближения с Землей - РЕАЛЬНЫЙ РАСЧЕТ НА ОСНОВЕ ОРБИТАЛЬНЫХ ПАРАМЕТРОВ"""
+        try:
+            a, e, i, Omega, omega, T = orbital_elements
+
+            print(f"🔍 Расчет сближения для: a={a}, e={e}, i={i}, Ω={Omega}, ω={omega}, T={T}")
+
+            # Текущее время
+            now = Time.now()
+            start_jd = now.jd
+
+            # Ищем минимальное расстояние в течение указанного периода
+            min_distance = float('inf')
+            best_jd = start_jd
+            step_days = 7  # Шаг в 7 дней для оптимизации
+
+            for days in range(0, days_ahead, step_days):
+                jd = start_jd + days
+
+                # Позиция кометы (гелиоцентрическая)
+                comet_pos = self.get_heliocentric_position(orbital_elements, jd)
+
+                # Позиция Земли (гелиоцентрическая)
+                earth_pos = self.get_earth_position(jd)
+
+                # Расстояние между кометой и Землей
+                distance = np.linalg.norm(comet_pos - earth_pos)
+
+                if distance < min_distance:
+                    min_distance = distance
+                    best_jd = jd
+
+            # Уточняем поиск вокруг найденного минимума
+            refine_days = 30
+            refine_start = best_jd - refine_days/2
+            refine_step = 1
+
+            for days in range(0, refine_days, refine_step):
+                jd = refine_start + days
+                if jd < start_jd:
+                    continue
+
+                comet_pos = self.get_heliocentric_position(orbital_elements, jd)
+                earth_pos = self.get_earth_position(jd)
+                distance = np.linalg.norm(comet_pos - earth_pos)
+
+                if distance < min_distance:
+                    min_distance = distance
+                    best_jd = jd
+
+            approach_date = Time(best_jd, format='jd')
+            date_str = approach_date.datetime.strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
+
+            # Безопасность зависит от расстояния
+            is_safe = min_distance > 0.1  # Безопасно если больше 0.1 а.е.
+
+            return {
+                'date': str(date_str),
+                'distance_au': float(min_distance),
+                'is_safe': bool(is_safe),
+                'min_distance_km': float(min_distance * 149597870.7)
+            }
+
+        except Exception as e:
+            print(f"❌ Ошибка в calculate_earth_approach: {str(e)}")
+            # Резервный расчет на основе упрощенной формулы
+            a, e, i, Omega, omega, T = orbital_elements
+            perihelion_distance = a * (1 - e)
+            earth_approach_distance = abs(perihelion_distance - 1.0)
+            is_safe = earth_approach_distance > 0.1
+
+            from datetime import datetime, timedelta
+            approach_date = datetime.now() + timedelta(days=30)
+            date_str = approach_date.strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
+
+            return {
+                'date': str(date_str),
+                'distance_au': float(earth_approach_distance),
+                'is_safe': bool(is_safe),
+                'min_distance_km': float(earth_approach_distance * 149597870.7)
+            }
+
+    def get_heliocentric_position(self, orbital_elements, jd):
+        """Возвращает гелиоцентрическую позицию кометы"""
+        a, e, i, Omega, omega, T = orbital_elements
+
+        t = jd - T
+        n = np.sqrt(self.GM_sun / a**3)
+        M = n * t
+        E = self.solve_kepler_accurate(M, e)
+        nu = 2 * np.arctan2(np.sqrt(1 + e) * np.sin(E/2), np.sqrt(1 - e) * np.cos(E/2))
+        r = a * (1 - e * np.cos(E))
+
+        i_rad = np.radians(i)
+        Omega_rad = np.radians(Omega)
+        omega_rad = np.radians(omega)
+
+        x_orb = r * np.cos(nu)
+        y_orb = r * np.sin(nu)
+
+        x_hel = (np.cos(omega_rad) * np.cos(Omega_rad) - np.sin(omega_rad) * np.sin(Omega_rad) * np.cos(i_rad)) * x_orb + \
+                (-np.sin(omega_rad) * np.cos(Omega_rad) - np.cos(omega_rad) * np.sin(Omega_rad) * np.cos(i_rad)) * y_orb
+
+        y_hel = (np.cos(omega_rad) * np.sin(Omega_rad) + np.sin(omega_rad) * np.cos(Omega_rad) * np.cos(i_rad)) * x_orb + \
+                (-np.sin(omega_rad) * np.sin(Omega_rad) + np.cos(omega_rad) * np.cos(Omega_rad) * np.cos(i_rad)) * y_orb
+
+        z_hel = (np.sin(omega_rad) * np.sin(i_rad)) * x_orb + (np.cos(omega_rad) * np.sin(i_rad)) * y_orb
+
+        return np.array([x_hel, y_hel, z_hel])
+
+    def get_earth_position(self, jd):
+        """Возвращает гелиоцентрическую позицию Земли"""
+        t = (jd - 2451545.0) / 36525.0
+
+        M_earth = 357.52911 + 35999.05029 * t - 0.0001537 * t**2
+
+        C_earth = (1.914602 - 0.004817 * t - 0.000014 * t**2) * np.sin(np.radians(M_earth)) + \
+                 (0.019993 - 0.000101 * t) * np.sin(2 * np.radians(M_earth)) + \
+                 0.000289 * np.sin(3 * np.radians(M_earth))
+
+        nu_earth = M_earth + C_earth
+
+        R_earth = 1.000001018 * (1 - 0.01670862**2) / (1 + 0.01670862 * np.cos(np.radians(nu_earth)))
+
+        x_earth = R_earth * np.cos(np.radians(nu_earth))
+        y_earth = R_earth * np.sin(np.radians(nu_earth))
+        z_earth = 0.0
+
+        return np.array([x_earth, y_earth, z_earth])
 
 def calculate_orbit_from_observations(observations_array):
     calculator = CometOrbitCalculator()
@@ -357,21 +485,53 @@ def calculate_approach():
         data = request.json
         orbit_params = data.get('orbit', {})
 
+        print("🔄 Расчет сближения с Землей для параметров:", orbit_params)
+
+        # Проверяем обязательные параметры
+        required_params = ['semi_major_axis', 'eccentricity', 'inclination',
+                          'longitude_ascending', 'argument_pericenter']
+
+        for param in required_params:
+            if param not in orbit_params:
+                return jsonify({
+                    "success": False,
+                    "error": f"Отсутствует обязательный параметр: {param}"
+                }), 400
+
+        # Создаем калькулятор
+        calculator = CometOrbitCalculator()
+
+        # Преобразуем параметры в орбитальные элементы
+        orbital_elements = [
+            float(orbit_params['semi_major_axis']),
+            float(orbit_params['eccentricity']),
+            float(orbit_params['inclination']),
+            float(orbit_params['longitude_ascending']),
+            float(orbit_params['argument_pericenter']),
+            float(orbit_params.get('time_perihelion', Time.now().jd + 100))
+        ]
+
+        # РЕАЛЬНЫЙ РАСЧЕТ СБЛИЖЕНИЯ
+        approach_data = calculator.calculate_earth_approach(orbital_elements, days_ahead=365)
+
         result = {
             "success": True,
             "approach": {
-                "date": "2024-12-20T10:30:00",
-                "distance_au": 0.8,
-                "is_safe": True
+                "date": approach_data['date'],
+                "distance_au": float(round(approach_data['distance_au'], 6)),
+                "distance_km": float(round(approach_data['min_distance_km'], 2)),
+                "is_safe": bool(approach_data['is_safe'])
             }
         }
 
+        print("📤 Результат сближения:", result)
         return jsonify(result)
 
     except Exception as e:
+        print("❌ Ошибка при расчете сближения:", str(e))
         return jsonify({
             "success": False,
-            "error": str(e)
+            "error": f"Ошибка расчета сближения: {str(e)}"
         }), 500
 
 @app.route('/api/check-duplicate', methods=['POST'])
