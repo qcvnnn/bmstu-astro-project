@@ -1,4 +1,4 @@
-#!/Users/sachaxodina/PycharmProjects/bmstu-astro-project/venv/bin/python3.13
+#!/home/ur0ch/task/bmstu-astro-project/venv/bin/python3
 # -*- coding: utf-8 -*-
 import re
 import sys
