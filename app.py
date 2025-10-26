@@ -26,6 +26,7 @@ def init_db():
             name TEXT NOT NULL,
             observations TEXT NOT NULL,
             orbital_elements TEXT NOT NULL,
+            image_data TEXT,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     ''')
@@ -33,6 +34,26 @@ def init_db():
     conn.close()
 
 init_db()
+
+def update_db_structure():
+    """Добавляет поле image_data если оно отсутствует"""
+    conn = sqlite3.connect('planets.db')
+    cursor = conn.cursor()
+
+    # Проверяем существует ли поле image_data
+    cursor.execute("PRAGMA table_info(planets)")
+    columns = [column[1] for column in cursor.fetchall()]
+
+    if 'image_data' not in columns:
+        cursor.execute('ALTER TABLE planets ADD COLUMN image_data TEXT')
+        conn.commit()
+        print("✅ База данных обновлена: добавлено поле image_data")
+
+    conn.close()
+
+# Вызываем после init_db()
+init_db()
+update_db_structure()
 
 class CometOrbitCalculator:
     def __init__(self):
@@ -157,33 +178,23 @@ class CometOrbitCalculator:
         return E
 
     def calculate_true_anomaly(self, orbital_elements, observation_times=None):
-        """
-        Расчет истинной аномалии для набора времен наблюдений
-        orbital_elements: [a, e, i, Omega, omega, T]
-        observation_times: список JD времен наблюдений (если None, используем последнее наблюдение)
-        """
+
         a, e, i, Omega, omega, T = orbital_elements
 
         if observation_times is None:
-            # Используем JD последнего наблюдения
             if self.observations:
                 observation_times = [self.observations[-1]['jd']]
             else:
                 return 0.0
 
-        # Расчет для последнего времени наблюдения
         jd = observation_times[-1] if isinstance(observation_times, list) else observation_times
 
-        # Среднее движение
         n = np.sqrt(self.GM_sun / a**3)
 
-        # Средняя аномалия
         M = n * (jd - T)
 
-        # Эксцентрическая аномалия (решение уравнения Кеплера)
         E = self.solve_kepler_accurate(M, e)
 
-        # Истинная аномалия
         nu = 2 * np.arctan2(np.sqrt(1 + e) * np.sin(E/2), np.sqrt(1 - e) * np.cos(E/2))
 
         return np.degrees(nu)
@@ -201,7 +212,7 @@ def get_planets():
     try:
         conn = sqlite3.connect('planets.db')
         cursor = conn.cursor()
-        cursor.execute('SELECT id, name, observations, orbital_elements, created_at FROM planets ORDER BY created_at DESC')
+        cursor.execute('SELECT id, name, observations, orbital_elements, image_data, created_at FROM planets ORDER BY created_at DESC')
         planets = cursor.fetchall()
         conn.close()
 
@@ -212,7 +223,8 @@ def get_planets():
                 'name': planet[1],
                 'observations': json.loads(planet[2]),
                 'orbital_elements': json.loads(planet[3]),
-                'created_at': planet[4]
+                'image_data': planet[4],  # ДОБАВЛЯЕМ ИЗОБРАЖЕНИЕ
+                'created_at': planet[5]
             })
 
         return jsonify({
@@ -232,6 +244,7 @@ def save_planet():
         name = data.get('name', '')
         observations = data.get('observations', [])
         orbital_elements = data.get('orbital_elements', {})
+        image_data = data.get('image_data', '')  # ДОБАВЛЯЕМ ПОЛУЧЕНИЕ ИЗОБРАЖЕНИЯ
 
         if not name:
             return jsonify({
@@ -242,8 +255,8 @@ def save_planet():
         conn = sqlite3.connect('planets.db')
         cursor = conn.cursor()
         cursor.execute(
-            'INSERT INTO planets (name, observations, orbital_elements) VALUES (?, ?, ?)',
-            (name, json.dumps(observations), json.dumps(orbital_elements))
+            'INSERT INTO planets (name, observations, orbital_elements, image_data) VALUES (?, ?, ?, ?)',
+            (name, json.dumps(observations), json.dumps(orbital_elements), image_data)
         )
         conn.commit()
         planet_id = cursor.lastrowid
@@ -286,6 +299,12 @@ def calculate_orbit():
         observations = data.get('observations', [])
 
         print("📨 Получены данные от фронтенда:", observations)
+
+        if len(observations) < 5:
+            return jsonify({
+                "success": False,
+                "error": "Необходимо минимум 5 наблюдений. Получено: {}".format(len(observations))
+            }), 400
 
         observations_array = []
         for obs in observations:
