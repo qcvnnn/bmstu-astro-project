@@ -283,28 +283,44 @@ class CometOrbitCalculator:
         return np.degrees(nu) % 360
 
     def calculate_earth_approach(self, orbital_elements, days_ahead=365):
-        """Улучшенный расчет сближения с Землей"""
+        """Стабильный расчет сближения с Землей"""
         try:
             a, e, i, Omega, omega, T = orbital_elements
 
-            # Используем astropy для точного расчета позиций
             now = Time.now()
             min_distance = float('inf')
             best_time = now
 
-            # Поиск минимального расстояния
+            # Фиксируем время начала для воспроизводимости
+            start_time = now.copy()
+
+            # Поиск с фиксированным шагом
+            search_points = []
             for days in range(0, days_ahead, 7):
-                check_time = now + days * u.day
+                check_time = start_time + days * u.day
+                search_points.append(check_time)
 
-                # Позиция кометы
+            # Добавляем дополнительные точки вокруг перигелия
+            perihelion_time = Time(T, format='jd')
+            for offset in [-30, -15, 0, 15, 30]:
+                extra_time = perihelion_time + offset * u.day
+                if start_time <= extra_time <= (start_time + days_ahead * u.day):
+                    search_points.append(extra_time)
+
+            # Убираем дубликаты и сортируем
+            search_points = sorted(set(search_points), key=lambda t: t.jd)
+
+            # Первый проход - грубый поиск
+            for check_time in search_points:
                 comet_pos = self.get_heliocentric_position(orbital_elements, check_time.jd)
 
-                # Позиция Земли через astropy
                 with solar_system_ephemeris.set('builtin'):
                     earth_pos = get_body_barycentric('earth', check_time)
-                    earth_pos_au = np.array([earth_pos.x.to(u.AU).value,
-                                           earth_pos.y.to(u.AU).value,
-                                           earth_pos.z.to(u.AU).value])
+                    earth_pos_au = np.array([
+                        earth_pos.x.to(u.AU).value,
+                        earth_pos.y.to(u.AU).value,
+                        earth_pos.z.to(u.AU).value
+                    ])
 
                 distance = np.linalg.norm(comet_pos - earth_pos_au)
 
@@ -312,42 +328,58 @@ class CometOrbitCalculator:
                     min_distance = distance
                     best_time = check_time
 
-            # Уточняем поиск
-            for hours in range(0, 168, 6):  # 1 неделя с шагом 6 часов
-                check_time = best_time + hours * u.hour
+            # Второй проход - точный поиск вокруг найденного минимума
+            refine_days = 14  # ±7 дней для уточнения
+            refine_step = 1   # Шаг 1 день
+
+            refine_start = best_time - refine_days/2 * u.day
+            for day_offset in range(0, refine_days + 1, refine_step):
+                check_time = refine_start + day_offset * u.day
+
                 comet_pos = self.get_heliocentric_position(orbital_elements, check_time.jd)
 
                 with solar_system_ephemeris.set('builtin'):
                     earth_pos = get_body_barycentric('earth', check_time)
-                    earth_pos_au = np.array([earth_pos.x.to(u.AU).value,
-                                           earth_pos.y.to(u.AU).value,
-                                           earth_pos.z.to(u.AU).value])
+                    earth_pos_au = np.array([
+                        earth_pos.x.to(u.AU).value,
+                        earth_pos.y.to(u.AU).value,
+                        earth_pos.z.to(u.AU).value
+                    ])
 
                 distance = np.linalg.norm(comet_pos - earth_pos_au)
 
                 if distance < min_distance:
                     min_distance = distance
                     best_time = check_time
+
+            # ФИКСИРУЕМ ВРЕМЯ - округляем до полудня для стабильности
+            fixed_time = Time(best_time.datetime.replace(hour=12, minute=0, second=0, microsecond=0))
 
             return {
-                'date': best_time.isot,
+                'date': fixed_time.isot,  # Используем ISO формат для consistency
                 'distance_au': float(min_distance),
                 'is_safe': min_distance > 0.1,
-                'min_distance_km': float(min_distance * 149597870.7)
+                'min_distance_km': float(min_distance * 149597870.7),
+                'search_accuracy_days': refine_step
             }
 
         except Exception as e:
             print(f"❌ Ошибка в calculate_earth_approach: {e}")
-            # Резервный расчет
+            # Резервный расчет с фиксированной логикой
             a, e, i, Omega, omega, T = orbital_elements
             perihelion_distance = a * (1 - e)
             earth_approach_distance = abs(perihelion_distance - 1.0)
 
+            # Фиксированная дата через 30 дней
+            fixed_date = Time.now() + 30 * u.day
+            fixed_date = Time(fixed_date.datetime.replace(hour=12, minute=0, second=0, microsecond=0))
+
             return {
-                'date': (Time.now() + 30 * u.day).isot,
+                'date': fixed_date.isot,
                 'distance_au': float(earth_approach_distance),
                 'is_safe': earth_approach_distance > 0.1,
-                'min_distance_km': float(earth_approach_distance * 149597870.7)
+                'min_distance_km': float(earth_approach_distance * 149597870.7),
+                'fallback': True  # Помечаем что это резервный расчет
             }
 
     def get_heliocentric_position(self, orbital_elements, jd):
@@ -379,6 +411,15 @@ class CometOrbitCalculator:
         return np.array([x_hel, y_hel, z_hel])
 
 # Остальные функции и эндпоинты остаются без изменений...
+def calculate_orbit_from_observations(observations_array):
+    calculator = CometOrbitCalculator()
+    for obs in observations_array:
+        ra, dec, datetime_str = obs
+        calculator.add_observation(ra, dec, datetime_str)
+    orbital_elements = calculator.calculate_orbital_elements()
+    return orbital_elements
+
+# ... остальные эндпоинты без изменений ...
 def calculate_orbit_from_observations(observations_array):
     calculator = CometOrbitCalculator()
     for obs in observations_array:
